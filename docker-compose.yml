@@ -1,0 +1,66 @@
+services:
+  db:
+    container_name: db
+    image: postgres:13
+    env_file:
+      - .env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    container_name: backend
+    build: ./backend
+    image: kittygram_backend
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - static:/static
+      - media:/app/media
+    command: >
+      sh -c "python manage.py migrate &&
+      python manage.py collectstatic --noinput &&
+      cp -r /app/collected_static/. /static/ &&
+      exec gunicorn kittygram_backend.wsgi:application --bind 0.0.0.0:8000"
+
+  frontend:
+    container_name: frontend
+    build: ./frontend
+    image: kittygram_frontend
+    volumes:
+      - static:/static
+    command: >
+      sh -c "cp -r /app/build/. /static/ &&
+      exec npx -y http-server -p 8000 /app/build"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /static/index.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gateway:
+    container_name: gateway
+    build: ./nginx
+    image: kittygram_gateway
+    depends_on:
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_healthy
+    ports:
+      - "9001:80"
+    volumes:
+      - static:/static
+      - media:/media
+
+volumes:
+  pg_data:
+  static:
+  media:
